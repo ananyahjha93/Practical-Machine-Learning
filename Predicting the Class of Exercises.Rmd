@@ -1,0 +1,113 @@
+---
+title: 'Practical Machine Learning: Predicting the Manner of the Weight Lifting Exercise'
+author: "Ananya Harsh Jha"
+output: html_document
+---
+
+```{r echo=FALSE, warning=FALSE}
+library(caret)
+library(randomForest)
+```
+
+# Introduction
+
+### Project Question:
+
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement – a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it.
+
+This project uses a data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways.
+
+The dataset training and test datasets used for this project were downloaded from 'http://groupware.les.inf.puc-rio.br/har'. More information can be found about this under the heading 'Weight Lifting Exercises Dataset'.
+
+# Loading and Cleaning Data
+
+```{r}
+trainingData <- read.csv('pml-training.csv', sep=",", header=TRUE, na.strings=c('NA', ' ', '')) 
+testData <- read.csv('pml-testing.csv', sep=",", header=TRUE, na.strings=c('NA', ' ', ''))
+```
+
+```{r results='hide'}
+head(trainingData)
+```
+
+From exploring the training dataset we find that a lot of columns contain NA values. Also exploring further, we find out that the **new_window** column has 2 values of 'yes' and 'no'. A lot of columns only have values in them corresoponding to the rows where **new_window** is 'yes'. We delete these rows from data as we do not consider time frames or windows for our prediciton model. Also now we delete all those columns which are not complete, ie have NAs.
+
+```{r}
+trainingData <- trainingData[trainingData$new_window == 'no', ]
+columns <- colSums(is.na(trainingData)) != nrow(trainingData)
+trainingData <- trainingData[, columns]
+testData <- testData[, columns]
+## Since the same transformation is used on both training and test sets, we delete the empty columns of the test set according to the training set.
+```
+
+Finally we delete the columns which contain timestamp or window information and the first column which contains row numbers.
+
+
+```{r}
+columns_remove <- grepl('X|window|timestamp', names(trainingData))
+trainingData <- trainingData[,!columns_remove]
+testData <- testData[,!columns_remove]
+```
+
+# Data Partitioning
+
+We partition the training dataset available to us furhter into training and validation datasets. The data will be split in a 75:25 ratio. The 75% of the training set is used to train the model with cross validation. The validation set is used to find the accuracy and the out of sample error rate of our model before the final submission. 
+
+```{r}
+set.seed(12345)
+inTrain <- createDataPartition(y=trainingData$classe, p=0.75, list=FALSE)
+trainingSet <- trainingData[inTrain, ]
+testSet <- trainingData[-inTrain, ]
+```
+
+# Training the model
+
+We use Random Forest algorithm for prediction due to its high accuracy. We use 5-fold cross validation keeping the bias vs variance trade-off in mind. We use all the variables in the dataset for the purpose of training our model. 
+
+```{r cache=TRUE}
+trainingControl <- trainControl(method="cv", number=5)
+modelFit <- train(classe ~ ., data=trainingSet, method="rf", trControl=trainingControl, prox=TRUE)
+modelFit
+```
+
+# Prediction on Validation Dataset
+
+Now we use our model to predict the data in the validation set and find the accuracy and the out of sample error. 
+
+```{r}
+prediction <- predict(modelFit, testSet)
+confusionMatrix(prediction, testSet$classe)
+```
+ 
+### Accuracy and Out of Sample Error
+
+As we can see from the output the estimated accuracy of the model is 99.4%. The model estimates the out of sample error rate to be 0.6%.
+
+# Prediction on the Test Set
+
+We use the model to predict output of the test set containing 20 instances. 
+
+```{r}
+answers <- predict(modelFit, testData)
+```
+
+# Figures and Plots
+
+1. We use 2 variables (randomly selected here) to plot our different classes and the class centres.
+
+```{r}
+predictionClasse <- classCenter(trainingSet[,c('roll_belt', 'yaw_belt')], trainingSet$classe, modelFit$finalModel$prox)
+predictionClasse <- as.data.frame(predictionClasse)
+predictionClasse$classe <- rownames(predictionClasse)
+p <- qplot(roll_belt, yaw_belt, data=trainingSet, col=classe)
+p + geom_point(aes(x=roll_belt, y=yaw_belt, col=classe), size=20, shape=4, data=predictionClasse)
+```
+
+In the selected variables, the class centres are not that separated.
+
+2. We also plot the true vs false predictions from our model.
+
+```{r}
+testSet$correct_prediction <- prediction == testSet$classe
+qplot(roll_belt, yaw_belt, color=correct_prediction, data=testSet, main="New Data Predictions")
+```
